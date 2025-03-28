@@ -7,18 +7,16 @@ import BackButton from '../../components/ui/BackButton.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 
 export default function SignIn() {
-  const { signIn, authLoading, handleNavigation } = useAuth();
-  const [email, setEmail] = useState('');
+  const { signIn, loading, handleNavigation } = useAuth();
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [touched, setTouched] = useState({ email: false, password: false });
-  const [errors, setErrors] = useState({ email: '', password: '' });
+  const [touched, setTouched] = useState({ username: false, password: false });
+  const [errors, setErrors] = useState({ username: '', password: '' });
 
   const validateForm = () => {
     const newErrors = {};
-    if (!email) newErrors.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Email is invalid';
+    if (!username) newErrors.username = 'Username is required';
     if (!password) newErrors.password = 'Password is required';
-    else if (password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -26,27 +24,26 @@ export default function SignIn() {
 
   const handleSignIn = async () => {
     if (!validateForm()) {
-      setTouched({ email: true, password: true });
+      setTouched({ username: true, password: true });
       return;
     }
-    await signIn(email, password);
+    await signIn(username, password);
   };
 
   return (
     <>
       <BackButton onPress={() => handleNavigation('welcome')} />
-      <AuthLayout title="Login" showTitle={true}>
+      <AuthLayout title="Sign In" showTitle={true}>
         <TextInput
-          label="Email"
-          placeholder="Enter your email"
-          value={email}
-          onChangeText={setEmail}
+          label="Username"
+          placeholder="Enter your username"
+          value={username}
+          onChangeText={setUsername}
           autoCapitalize="none"
-          keyboardType="email-address"
-          error={errors.email}
-          touched={touched.email}
-          onBlur={() => setTouched(prev => ({ ...prev, email: true }))}
-          editable={!authLoading}
+          autoCorrect={false}
+          error={errors.username}
+          touched={touched.username}
+          onBlur={() => setTouched(prev => ({ ...prev, username: true }))}
         />
         
         <TextInput
@@ -59,22 +56,20 @@ export default function SignIn() {
           error={errors.password}
           touched={touched.password}
           onBlur={() => setTouched(prev => ({ ...prev, password: true }))}
-          editable={!authLoading}
         />
 
         <Button
-          title={authLoading ? 'Logging in...' : 'Login'}
+          title={loading ? 'Loading...' : 'Sign In'}
           onPress={handleSignIn}
-          disabled={authLoading}
+          disabled={loading}
         />
 
         <TouchableOpacity 
           onPress={() => handleNavigation('signup')}
           className="mt-12 py-3"
-          disabled={authLoading}
         >
           <Text className="text-center text-[#556B2F] text-lg font-medium">
-            Don't have an account? Sign Up
+            Don't have an account? Sign up
           </Text>
         </TouchableOpacity>
       </AuthLayout>

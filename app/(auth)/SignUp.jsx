@@ -8,15 +8,21 @@ import { useAuth } from '../../context/AuthContext.jsx';
 
 export default function SignUp() {
   const { signUp, loading, handleNavigation } = useAuth();
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [touched, setTouched] = useState({ email: false, password: false });
-  const [errors, setErrors] = useState({ email: '', password: '' });
+  const [touched, setTouched] = useState({ username: false, email: false, password: false });
+  const [errors, setErrors] = useState({ username: '', email: '', password: '' });
 
   const validateForm = () => {
     const newErrors = {};
+    if (!username) newErrors.username = 'Username is required';
+    else if (username.length < 3) newErrors.username = 'Username must be at least 3 characters';
+    else if (!/^[a-zA-Z0-9_]+$/.test(username)) newErrors.username = 'Username can only contain letters, numbers, and underscores';
+    
     if (!email) newErrors.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Email is invalid';
+    
     if (!password) newErrors.password = 'Password is required';
     else if (password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     
@@ -26,16 +32,28 @@ export default function SignUp() {
 
   const handleSignUp = async () => {
     if (!validateForm()) {
-      setTouched({ email: true, password: true });
+      setTouched({ username: true, email: true, password: true });
       return;
     }
-    await signUp(email, password);
+    await signUp(username, email, password);
   };
 
   return (
     <>
       <BackButton onPress={() => handleNavigation('welcome')} />
       <AuthLayout title="Sign Up" showTitle={true}>
+        <TextInput
+          label="Username"
+          placeholder="Choose a username"
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
+          autoCorrect={false}
+          error={errors.username}
+          touched={touched.username}
+          onBlur={() => setTouched(prev => ({ ...prev, username: true }))}
+        />
+
         <TextInput
           label="Email"
           placeholder="Enter your email"
