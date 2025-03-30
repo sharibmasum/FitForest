@@ -1,18 +1,48 @@
 import { Tabs, Redirect } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
-import { View } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useWorkoutPlan } from '../../hooks/useWorkoutPlan';
+import { useEffect } from 'react';
 
 export default function TabsLayout() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { workoutPlan, fetchWorkoutPlan, loading: planLoading } = useWorkoutPlan();
 
-  if (loading) {
-    return null;
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchWorkoutPlan();
+    }
+  }, [isAuthenticated]);
+
+  // Show loading indicator while checking auth and plan
+  if (authLoading || (isAuthenticated && planLoading)) {
+    return (
+      <View className="flex-1 justify-center items-center">
+        <ActivityIndicator size="large" color="#556B2F" />
+      </View>
+    );
   }
 
+  // Redirect to auth if not authenticated
   if (!isAuthenticated) {
     return <Redirect href="/" />;
   }
+
+  const defaultTabBarStyle = {
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    display: 'flex',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    elevation: 8,
+    backgroundColor: 'white',
+    height: 85,
+    paddingBottom: 25,
+    paddingTop: 5,
+  };
 
   return (
     <Tabs 
@@ -20,10 +50,7 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#556B2F',
         tabBarInactiveTintColor: '#9CA3AF',
-        tabBarStyle: {
-          borderTopWidth: 1,
-          borderTopColor: '#E5E7EB',
-        }
+        tabBarStyle: defaultTabBarStyle
       }}
     >
       <Tabs.Screen
@@ -51,6 +78,16 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="settings" size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="SetWorkoutPlan"
+        options={{
+          title: 'Set Plan',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="calendar" size={size} color={color} />
+          ),
+          tabBarStyle: defaultTabBarStyle // Use the same style for consistency
         }}
       />
     </Tabs>

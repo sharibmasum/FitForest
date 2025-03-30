@@ -50,47 +50,59 @@ export function AuthProvider({ children }) {
     setScreen(screenName);
   }, []);
 
-  const signIn = async (username, password) => {
+  const signIn = async (usernameOrEmail, password, isEmailMode = false) => {
     if (authLoading) return;
     
     try {
       setAuthLoading(true);
       
-      // First, get the email associated with the username
-      const { data: userData, error: userError } = await supabase
-        .from('profiles')
-        .select('email')
-        .eq('username', username)
-        .maybeSingle();
+      let email = usernameOrEmail;
+      
+      // If not in email mode, look up the email by username
+      if (!isEmailMode) {
+        const { data: userData, error: userError } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('username', usernameOrEmail)
+          .maybeSingle();
 
-      if (userError) {
-        console.error('User lookup error:', userError);
-        throw new Error('Error looking up username');
+        if (userError) {
+          console.error('User lookup error:', userError);
+          throw new Error('Error looking up username');
+        }
+
+        if (!userData) {
+          return { error: 'Username not found' };
+        }
+
+        email = userData.email;
       }
 
-      if (!userData) {
-        throw new Error('Username not found');
-      }
-
-      console.log('Found user profile for:', username);
-
-      // Then sign in with the email
+      // Sign in with email
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: userData.email,
+        email,
         password,
       });
       
       if (error) {
         console.error('Sign in error:', error);
-        throw new Error('Invalid password');
+        if (error.message === 'Email not confirmed') {
+          throw new Error('Please confirm your email before signing in. Check your inbox for the confirmation link.');
+        }
+        if (error.message.includes('Invalid login credentials')) {
+          throw new Error(isEmailMode ? 'Invalid email or password' : 'Invalid password');
+        }
+        throw error;
       }
 
       setSession(data.session);
       setUser(data.user);
       showToast('Successfully logged in!', 'success');
+      return { success: true };
     } catch (error) {
       console.error('SignIn Error:', error.message);
       showToast(error.message);
+      return { error: error.message };
     } finally {
       setAuthLoading(false);
     }
@@ -113,13 +125,14 @@ export function AuthProvider({ children }) {
         throw new Error('Username is already taken');
       }
 
-      // Create auth user
+      // Create auth user with metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
-            username // Store username in user metadata
+            username, // Store username in user metadata for later use
+            pendingUsername: username // Store as pending until email confirmation
           }
         }
       });
@@ -133,33 +146,8 @@ export function AuthProvider({ children }) {
         throw new Error('Failed to create user');
       }
 
-      console.log('Created auth user:', authData.user.id);
-
-      // Create profile with username
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert([
-          {
-            id: authData.user.id,
-            username,
-            email,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
-        ], {
-          onConflict: 'id',
-          ignoreDuplicates: false
-        });
-
-      if (profileError) {
-        console.error('Profile Error:', profileError);
-        // If profile creation fails, clean up the auth user
-        await supabase.auth.signOut();
-        throw new Error('Failed to create profile. Please try again.');
-      }
-
-      console.log('Created profile for user:', username);
-      showToast('Check your email for the confirmation link!', 'success');
+      showToast('Please check your email to confirm your account!', 'success');
+      handleNavigation('signin'); // Redirect to sign in page
     } catch (error) {
       console.error('SignUp Error:', error.message);
       showToast(error.message);
@@ -167,6 +155,57 @@ export function AuthProvider({ children }) {
       setAuthLoading(false);
     }
   };
+
+  // Handle email confirmation and profile creation
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN') {
+        // Check if this is a new confirmation
+        const user = session?.user;
+        if (user?.user_metadata?.pendingUsername) {
+          try {
+            // Create profile with username
+            const { error: profileError } = await supabase
+              .from('profiles')
+              .upsert([
+                {
+                  id: user.id,
+                  username: user.user_metadata.pendingUsername,
+                  email: user.email,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                }
+              ], {
+                onConflict: 'id',
+                ignoreDuplicates: false
+              });
+
+            if (profileError) {
+              console.error('Profile Error:', profileError);
+              showToast('Error creating profile. Please contact support.', 'error');
+              return;
+            }
+
+            // Clear the pendingUsername flag
+            await supabase.auth.updateUser({
+              data: {
+                pendingUsername: null
+              }
+            });
+
+            showToast('Email confirmed! You can now sign in.', 'success');
+          } catch (error) {
+            console.error('Profile Creation Error:', error);
+            showToast('Error creating profile. Please contact support.', 'error');
+          }
+        }
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   const signOut = async () => {
     if (authLoading) return;

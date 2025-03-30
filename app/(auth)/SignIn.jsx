@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TouchableOpacity, Text } from 'react-native';
+import { TouchableOpacity, Text, View } from 'react-native';
 import Button from '../../components/ui/Button.jsx';
 import TextInput from '../../components/ui/TextInput.jsx';
 import AuthLayout from './_layout.jsx';
@@ -12,10 +12,17 @@ export default function SignIn() {
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState({ username: false, password: false });
   const [errors, setErrors] = useState({ username: '', password: '' });
+  const [usernameAttempts, setUsernameAttempts] = useState(0);
+  const [showEmailSuggestion, setShowEmailSuggestion] = useState(false);
+  const [isEmailMode, setIsEmailMode] = useState(false);
 
   const validateForm = () => {
     const newErrors = {};
-    if (!username) newErrors.username = 'Username is required';
+    if (!username) {
+      newErrors.username = isEmailMode ? 'Email is required' : 'Username is required';
+    } else if (isEmailMode && !/\S+@\S+\.\S+/.test(username)) {
+      newErrors.username = 'Email is invalid';
+    }
     if (!password) newErrors.password = 'Password is required';
     
     setErrors(newErrors);
@@ -27,7 +34,31 @@ export default function SignIn() {
       setTouched({ username: true, password: true });
       return;
     }
-    await signIn(username, password);
+
+    const result = await signIn(username, password, isEmailMode);
+    
+    if (result?.error === 'Username not found') {
+      const newAttempts = usernameAttempts + 1;
+      setUsernameAttempts(newAttempts);
+      
+      if (newAttempts === 1) {
+        setShowEmailSuggestion(true);
+      } else if (newAttempts >= 2) {
+        setShowEmailSuggestion(true);
+        setErrors(prev => ({
+          ...prev,
+          username: 'If you recently created an account, try signing in with your email instead'
+        }));
+      }
+    }
+  };
+
+  const switchToEmail = () => {
+    setIsEmailMode(true);
+    setUsername('');
+    setShowEmailSuggestion(false);
+    setErrors({});
+    setTouched({ username: false, password: false });
   };
 
   return (
@@ -35,16 +66,31 @@ export default function SignIn() {
       <BackButton onPress={() => handleNavigation('welcome')} />
       <AuthLayout title="Sign In" showTitle={true}>
         <TextInput
-          label="Username"
-          placeholder="Enter your username"
+          label={isEmailMode ? "Email" : "Username"}
+          placeholder={isEmailMode ? "Enter your email" : "Enter your username"}
           value={username}
-          onChangeText={setUsername}
+          onChangeText={(text) => {
+            setUsername(text);
+            if (errors.username) setErrors(prev => ({ ...prev, username: '' }));
+          }}
           autoCapitalize="none"
           autoCorrect={false}
           error={errors.username}
           touched={touched.username}
           onBlur={() => setTouched(prev => ({ ...prev, username: true }))}
+          keyboardType={isEmailMode ? "email-address" : "default"}
         />
+        
+        {showEmailSuggestion && !isEmailMode && (
+          <TouchableOpacity 
+            onPress={switchToEmail}
+            className="mt-1 mb-4"
+          >
+            <Text className="text-[#556B2F] text-sm">
+              Try signing in with your email instead?
+            </Text>
+          </TouchableOpacity>
+        )}
         
         <TextInput
           label="Password"
