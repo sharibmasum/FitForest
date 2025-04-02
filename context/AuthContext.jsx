@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import Toast from '../components/ui/Toast';
+import { useRouter } from 'expo-router';
 
 const AuthContext = createContext({});
 
@@ -11,6 +12,7 @@ export function AuthProvider({ children }) {
   const [authLoading, setAuthLoading] = useState(false);
   const [screen, setScreen] = useState('welcome');
   const [toast, setToast] = useState(null);
+  const router = useRouter();
 
   useEffect(() => {
     checkUser();
@@ -125,6 +127,17 @@ export function AuthProvider({ children }) {
         throw new Error('Username is already taken');
       }
 
+      // Check if email is already registered
+      const { data: existingEmail, error: emailError } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (existingEmail) {
+        throw new Error('An account with this email already exists');
+      }
+
       // Create auth user with metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
@@ -173,7 +186,8 @@ export function AuthProvider({ children }) {
                   username: user.user_metadata.pendingUsername,
                   email: user.email,
                   created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString()
+                  updated_at: new Date().toISOString(),
+                  gym_location_set: false // Add this field
                 }
               ], {
                 onConflict: 'id',
@@ -193,7 +207,18 @@ export function AuthProvider({ children }) {
               }
             });
 
-            showToast('Email confirmed! You can now sign in.', 'success');
+            // Redirect to gym selection if not set
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('gym_location_set')
+              .eq('id', user.id)
+              .single();
+
+            if (!profile?.gym_location_set) {
+              router.push('/SelectGymLocation');
+            } else {
+              showToast('Email confirmed! You can now sign in.', 'success');
+            }
           } catch (error) {
             console.error('Profile Creation Error:', error);
             showToast('Error creating profile. Please contact support.', 'error');
@@ -205,7 +230,7 @@ export function AuthProvider({ children }) {
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   const signOut = async () => {
     if (authLoading) return;

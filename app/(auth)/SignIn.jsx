@@ -7,14 +7,13 @@ import BackButton from '../../components/ui/BackButton.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 
 export default function SignIn() {
-  const { signIn, loading, handleNavigation } = useAuth();
+  const { signIn, loading, handleNavigation, showToast } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState({ username: false, password: false });
   const [errors, setErrors] = useState({ username: '', password: '' });
   const [usernameAttempts, setUsernameAttempts] = useState(0);
-  const [showEmailSuggestion, setShowEmailSuggestion] = useState(false);
-  const [isEmailMode, setIsEmailMode] = useState(false);
+  const [isEmailMode, setIsEmailMode] = useState(true);
 
   const validateForm = () => {
     const newErrors = {};
@@ -41,22 +40,24 @@ export default function SignIn() {
       const newAttempts = usernameAttempts + 1;
       setUsernameAttempts(newAttempts);
       
-      if (newAttempts === 1) {
-        setShowEmailSuggestion(true);
-      } else if (newAttempts >= 2) {
-        setShowEmailSuggestion(true);
-        setErrors(prev => ({
-          ...prev,
-          username: 'If you recently created an account, try signing in with your email instead'
-        }));
+      if (newAttempts >= 2) {
+        setErrors(prev => ({ ...prev, username: '' }));
+      } else {
+        showToast('Username not found. Please check your username or try signing in with your email.');
       }
     }
+  };
+
+  const switchToUsername = () => {
+    setIsEmailMode(false);
+    setUsername('');
+    setErrors({});
+    setTouched({ username: false, password: false });
   };
 
   const switchToEmail = () => {
     setIsEmailMode(true);
     setUsername('');
-    setShowEmailSuggestion(false);
     setErrors({});
     setTouched({ username: false, password: false });
   };
@@ -81,13 +82,24 @@ export default function SignIn() {
           keyboardType={isEmailMode ? "email-address" : "default"}
         />
         
-        {showEmailSuggestion && !isEmailMode && (
+        {isEmailMode && (
+          <TouchableOpacity 
+            onPress={switchToUsername}
+            className="mt-1 mb-4"
+          >
+            <Text className="text-[#556B2F] text-sm">
+              Want to use your username instead?
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {!isEmailMode && usernameAttempts >= 2 && (
           <TouchableOpacity 
             onPress={switchToEmail}
             className="mt-1 mb-4"
           >
             <Text className="text-[#556B2F] text-sm">
-              Try signing in with your email instead?
+              If you recently created an account, try signing in with your email instead
             </Text>
           </TouchableOpacity>
         )}
