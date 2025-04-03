@@ -1,14 +1,14 @@
 import React from 'react';
 import { Text, View, Image } from 'react-native';
 import Button from '../../components/ui/Button';
-import AuthLayout from './_layout';
-import { useAuth } from '../../context/AuthContext';
+import { AuthScreenLayout } from './_layout';
+import { useAuthNavigation } from '../../components/navigation/AuthNavigation';
 
 export default function Welcome() {
-  const { handleNavigation } = useAuth();
+  const { navigate } = useAuthNavigation();
 
   return (
-    <AuthLayout showTitle={false}>
+    <AuthScreenLayout showTitle={false}>
       <View className="items-center">
         <Image 
           source={require('../../assets/FitForestLogoNoText-removebg.png')}
@@ -22,16 +22,16 @@ export default function Welcome() {
       <View className="w-full items-center">
         <Button
           title="Get Started"
-          onPress={() => handleNavigation('signup')}
+          onPress={() => navigate('signup')}
           className="mb-4"
         />
 
         <Button 
           title="Have an account?"
-          onPress={() => handleNavigation('signin')}
+          onPress={() => navigate('signin')}
           variant="secondary"
         />
       </View>
-    </AuthLayout>
+    </AuthScreenLayout>
   );
 } 

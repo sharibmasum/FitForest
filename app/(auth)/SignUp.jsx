@@ -2,17 +2,33 @@ import React, { useState } from 'react';
 import { TouchableOpacity, Text } from 'react-native';
 import Button from '../../components/ui/Button.jsx';
 import TextInput from '../../components/ui/TextInput.jsx';
-import AuthLayout from './_layout.jsx';
+import { AuthScreenLayout } from './_layout.jsx';
 import BackButton from '../../components/ui/BackButton.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { AuthNavigationButtons } from '../../components/navigation/AuthNavigation.jsx';
+import { useSlideNavigation } from '../../hooks/useSlideNavigation';
+import { useRouter } from 'expo-router';
 
 export default function SignUp() {
-  const { signUp, loading, handleNavigation } = useAuth();
+  const { signUp, loading } = useAuth();
+  const { goBack } = useSlideNavigation();
+  const router = useRouter();
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [touched, setTouched] = useState({ username: false, email: false, password: false });
-  const [errors, setErrors] = useState({ username: '', email: '', password: '' });
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [touched, setTouched] = useState({ 
+    username: false, 
+    email: false, 
+    password: false,
+    confirmPassword: false 
+  });
+  const [errors, setErrors] = useState({ 
+    username: '', 
+    email: '', 
+    password: '',
+    confirmPassword: '' 
+  });
 
   const validateForm = () => {
     const newErrors = {};
@@ -26,22 +42,33 @@ export default function SignUp() {
     if (!password) newErrors.password = 'Password is required';
     else if (password.length < 6) newErrors.password = 'Password must be at least 6 characters';
     
+    if (!confirmPassword) newErrors.confirmPassword = 'Please confirm your password';
+    else if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
+    
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSignUp = async () => {
     if (!validateForm()) {
-      setTouched({ username: true, email: true, password: true });
+      setTouched({ 
+        username: true, 
+        email: true, 
+        password: true,
+        confirmPassword: true 
+      });
       return;
     }
-    await signUp(username, email, password);
+    const result = await signUp(username, email, password);
+    if (result?.success) {
+      router.replace('/(setup)/SelectGymLocation');
+    }
   };
 
   return (
     <>
-      <BackButton onPress={() => handleNavigation('welcome')} />
-      <AuthLayout title="Sign Up" showTitle={true}>
+      <BackButton onPress={goBack} />
+      <AuthScreenLayout title="Sign Up" showTitle={true}>
         <TextInput
           label="Username"
           placeholder="Choose a username"
@@ -78,21 +105,26 @@ export default function SignUp() {
           onBlur={() => setTouched(prev => ({ ...prev, password: true }))}
         />
 
+        <TextInput
+          label="Confirm Password"
+          placeholder="Confirm your password"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          error={errors.confirmPassword}
+          touched={touched.confirmPassword}
+          onBlur={() => setTouched(prev => ({ ...prev, confirmPassword: true }))}
+        />
+
         <Button
           title={loading ? 'Loading...' : 'Sign Up'}
           onPress={handleSignUp}
           disabled={loading}
         />
 
-        <TouchableOpacity 
-          onPress={() => handleNavigation('signin')}
-          className="mt-12 py-3"
-        >
-          <Text className="text-center text-[#556B2F] text-lg font-medium">
-            Already have an account? Login
-          </Text>
-        </TouchableOpacity>
-      </AuthLayout>
+        <AuthNavigationButtons showBack={false} switchTo="signin" />
+      </AuthScreenLayout>
     </>
   );
 } 

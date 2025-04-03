@@ -1,21 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, Alert, ActivityIndicator, Dimensions, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Dimensions, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
 import { supabase } from '../../lib/supabase';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../../context/AuthContext';
+import BackButton from '../../components/ui/BackButton';
+import { Ionicons } from '@expo/vector-icons';
+import Toast from '../../components/ui/Toast';
+import { useSlideNavigation } from '../../hooks/useSlideNavigation';
 
-export default function SelectGymLocation() {
+export default function ChangeGymLocation() {
   const router = useRouter();
+  const { user } = useAuth();
+  const { goBack } = useSlideNavigation();
   const [location, setLocation] = useState(null);
   const [selectedGym, setSelectedGym] = useState(null);
+  const [currentGym, setCurrentGym] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
+        // Fetch current gym location
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('gym_location')
+          .eq('id', user.id)
+          .single();
+
+        if (error) throw error;
+        if (data?.gym_location) {
+          setCurrentGym(data.gym_location);
+        }
+
+        // Get current device location
         let { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           setErrorMsg('Please enable location services to select your gym location.');
@@ -42,19 +64,14 @@ export default function SelectGymLocation() {
 
   const handleSaveGym = async () => {
     if (!selectedGym) {
-      Alert.alert('Error', 'Please select a gym location on the map');
+      setToast({
+        message: 'Please select a gym location on the map',
+        type: 'error'
+      });
       return;
     }
 
     try {
-      // Get the current user
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        throw new Error('No user found');
-      }
-
-      // Save the gym location to the user's profile
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -65,10 +82,20 @@ export default function SelectGymLocation() {
 
       if (error) throw error;
 
-      // Always go to workout plan setup after saving gym location
-      router.replace('/(setup)/InitializeWorkoutPlan');
+      setToast({
+        message: 'Gym location updated successfully!',
+        type: 'success'
+      });
+      
+      // Wait for toast to be visible before navigating back
+      setTimeout(() => {
+        router.back();
+      }, 1500);
     } catch (error) {
-      Alert.alert('Error', 'Failed to save gym location. Please try again.');
+      setToast({
+        message: 'Failed to save gym location. Please try again.',
+        type: 'error'
+      });
     }
   };
 
@@ -120,40 +147,70 @@ export default function SelectGymLocation() {
 
   return (
     <View className="flex-1 bg-white">
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onHide={() => setToast(null)}
+        />
+      )}
       <SafeAreaView className="flex-1" edges={['top']}>
+        <View className="pt-2 px-4">
+          <BackButton onPress={goBack} />
+        </View>
+        
         {/* Header */}
         <View className="px-4 pt-8 pb-2">
-          <Text className="text-3xl font-bold text-[#556B2F]">
-            Select Your Home Gym
-          </Text>
-          <Text className="text-gray-600 mt-2">
-            Tap on the map to select your nearest gym location
+          <View className="items-center">
+            <Text className="text-3xl font-bold text-[#556B2F]">
+              Change Gym Location
+            </Text>
+          </View>
+          <Text className="text-gray-600 mt-2 text-center">
+            Tap on the map to select your new gym location
           </Text>
         </View>
 
         {/* Map Container */}
         <View style={styles.mapContainer}>
           <View style={styles.mapBorder}>
-            <MapView
-              style={styles.map}
-              initialRegion={{
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
-              }}
-              onPress={handleMapPress}
-              showsUserLocation={true}
-              showsMyLocationButton={true}
-            >
-              {selectedGym && (
-                <Marker
-                  coordinate={selectedGym}
-                  title="Selected Gym"
-                  description="Your chosen gym location"
-                />
-              )}
-            </MapView>
+            {location && location.coords && (
+              <MapView
+                style={styles.map}
+                initialRegion={{
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                  latitudeDelta: 0.02,
+                  longitudeDelta: 0.02,
+                }}
+                onPress={handleMapPress}
+                showsUserLocation={true}
+                showsMyLocationButton={true}
+              >
+                {currentGym && currentGym.latitude && currentGym.longitude && (
+                  <Marker
+                    coordinate={currentGym}
+                    title="Current Gym"
+                    description="Your current gym location"
+                  >
+                    <View className="bg-[#556B2F] p-2 rounded-full border-2 border-white">
+                      <Ionicons name="barbell-outline" size={24} color="white" />
+                    </View>
+                  </Marker>
+                )}
+                {selectedGym && selectedGym.latitude && selectedGym.longitude && (
+                  <Marker
+                    coordinate={selectedGym}
+                    title="New Gym"
+                    description="Your selected new gym location"
+                  >
+                    <View className="bg-[#8fbc8f] p-2 rounded-full border-2 border-white">
+                      <Ionicons name="barbell" size={24} color="white" />
+                    </View>
+                  </Marker>
+                )}
+              </MapView>
+            )}
           </View>
         </View>
 
@@ -166,7 +223,7 @@ export default function SelectGymLocation() {
               disabled={!selectedGym}
             >
               <Text className="text-white text-center font-semibold text-lg">
-                Save Gym Location
+                Save New Location
               </Text>
             </TouchableOpacity>
           </View>

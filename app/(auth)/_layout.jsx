@@ -1,7 +1,46 @@
 import React from 'react';
 import { View, Text, KeyboardAvoidingView, Platform } from 'react-native';
+import { Stack } from 'expo-router';
 
-export default function AuthLayout({ children, title, showTitle = true }) {
+export default function AuthLayout() {
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        gestureEnabled: true,
+        gestureDirection: 'horizontal',
+        contentStyle: { backgroundColor: '#F0FFF0' }
+      }}
+    >
+      <Stack.Screen 
+        name="index"
+        options={{
+          animation: 'none'
+        }}
+      />
+      <Stack.Screen 
+        name="Welcome"
+        options={{
+          gestureEnabled: true
+        }}
+      />
+      <Stack.Screen 
+        name="SignIn"
+        options={{
+          gestureEnabled: true
+        }}
+      />
+      <Stack.Screen 
+        name="SignUp"
+        options={{
+          gestureEnabled: true
+        }}
+      />
+    </Stack>
+  );
+}
+
+export function AuthScreenLayout({ children, title, showTitle = true }) {
   return (
     <KeyboardAvoidingView 
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

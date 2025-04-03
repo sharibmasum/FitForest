@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { supabase } from '../lib/supabase';
 import Toast from '../components/ui/Toast';
 import { useRouter } from 'expo-router';
+import { useSlideNavigation } from '../hooks/useSlideNavigation';
 
 const AuthContext = createContext({});
 
@@ -10,9 +11,9 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
-  const [screen, setScreen] = useState('welcome');
   const [toast, setToast] = useState(null);
   const router = useRouter();
+  const { navigate } = useSlideNavigation();
 
   useEffect(() => {
     checkUser();
@@ -47,10 +48,6 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }
   };
-
-  const handleNavigation = useCallback((screenName) => {
-    setScreen(screenName);
-  }, []);
 
   const signIn = async (usernameOrEmail, password, isEmailMode = false) => {
     if (authLoading) return;
@@ -144,8 +141,8 @@ export function AuthProvider({ children }) {
         password,
         options: {
           data: {
-            username, // Store username in user metadata for later use
-            pendingUsername: username // Store as pending until email confirmation
+            username,
+            pendingUsername: username
           }
         }
       });
@@ -159,78 +156,16 @@ export function AuthProvider({ children }) {
         throw new Error('Failed to create user');
       }
 
-      showToast('Please check your email to confirm your account!', 'success');
-      handleNavigation('signin'); // Redirect to sign in page
+      showToast('Account created successfully!', 'success');
+      return { success: true };
     } catch (error) {
       console.error('SignUp Error:', error.message);
       showToast(error.message);
+      return { error: error.message };
     } finally {
       setAuthLoading(false);
     }
   };
-
-  // Handle email confirmation and profile creation
-  useEffect(() => {
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN') {
-        // Check if this is a new confirmation
-        const user = session?.user;
-        if (user?.user_metadata?.pendingUsername) {
-          try {
-            // Create profile with username
-            const { error: profileError } = await supabase
-              .from('profiles')
-              .upsert([
-                {
-                  id: user.id,
-                  username: user.user_metadata.pendingUsername,
-                  email: user.email,
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                  gym_location_set: false // Add this field
-                }
-              ], {
-                onConflict: 'id',
-                ignoreDuplicates: false
-              });
-
-            if (profileError) {
-              console.error('Profile Error:', profileError);
-              showToast('Error creating profile. Please contact support.', 'error');
-              return;
-            }
-
-            // Clear the pendingUsername flag
-            await supabase.auth.updateUser({
-              data: {
-                pendingUsername: null
-              }
-            });
-
-            // Redirect to gym selection if not set
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('gym_location_set')
-              .eq('id', user.id)
-              .single();
-
-            if (!profile?.gym_location_set) {
-              router.push('/SelectGymLocation');
-            } else {
-              showToast('Email confirmed! You can now sign in.', 'success');
-            }
-          } catch (error) {
-            console.error('Profile Creation Error:', error);
-            showToast('Error creating profile. Please contact support.', 'error');
-          }
-        }
-      }
-    });
-
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
-  }, [router]);
 
   const signOut = async () => {
     if (authLoading) return;
@@ -240,9 +175,13 @@ export function AuthProvider({ children }) {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
       
+      // Update the auth state first
       setSession(null);
       setUser(null);
-      setScreen('welcome');
+      
+      // Then navigate to the Welcome screen directly
+      router.replace('/Welcome');
+      
       showToast('Successfully signed out', 'success');
     } catch (error) {
       showToast(error.message);
@@ -258,11 +197,9 @@ export function AuthProvider({ children }) {
         session,
         loading,
         authLoading,
-        screen,
         signIn,
         signUp,
         signOut,
-        handleNavigation,
         isAuthenticated: !!session,
         showToast,
       }}

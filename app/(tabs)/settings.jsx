@@ -2,9 +2,11 @@ import React from 'react';
 import { View, Text, SafeAreaView, TouchableOpacity } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
+import { useSlideNavigation } from '../../hooks/useSlideNavigation.js';
 
 export default function Settings() {
   const { signOut } = useAuth();
+  const { navigate } = useSlideNavigation();
 
   const settingsOptions = [
     {
@@ -23,6 +25,17 @@ export default function Settings() {
         { label: 'Language', icon: 'language-outline' },
         { label: 'Help & Support', icon: 'help-circle-outline' },
         { label: 'About', icon: 'information-circle-outline' },
+      ]
+    },
+    {
+      title: 'Location',
+      icon: 'location',
+      items: [
+        { 
+          label: 'Change Gym Location', 
+          icon: 'location-outline',
+          onPress: () => navigate('/ChangeGymLocation')
+        }
       ]
     }
   ];
@@ -43,6 +56,7 @@ export default function Settings() {
               {section.items.map((item, itemIndex) => (
                 <TouchableOpacity
                   key={item.label}
+                  onPress={item.onPress}
                   className={`flex-row items-center p-4 ${
                     itemIndex < section.items.length - 1 ? 'border-b border-gray-200' : ''
                   }`}

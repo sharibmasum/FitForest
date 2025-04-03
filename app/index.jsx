@@ -1,4 +1,4 @@
-import { View } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { Redirect } from 'expo-router';
 import Auth from '../components/auth/Auth';
 import { useAuth } from '../context/AuthContext';
@@ -30,8 +30,13 @@ export default function Index() {
     checkGymLocation();
   }, [isAuthenticated]);
 
+  // Show loading state
   if (authLoading || (isAuthenticated && (planLoading || gymLocationSet === null))) {
-    return null;
+    return (
+      <View className="flex-1 items-center justify-center">
+        <ActivityIndicator size="large" color="#556B2F" />
+      </View>
+    );
   }
 
   if (isAuthenticated) {
@@ -43,9 +48,6 @@ export default function Index() {
     return <Redirect href="/(tabs)/TreeHome" />;
   }
 
-  return (
-    <View className="flex-1">
-      <Auth />
-    </View>
-  );
+  // If not authenticated, redirect to Welcome screen
+  return <Redirect href="/Welcome" />;
 } 

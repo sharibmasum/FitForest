@@ -2,12 +2,18 @@ import React, { useState } from 'react';
 import { TouchableOpacity, Text, View } from 'react-native';
 import Button from '../../components/ui/Button.jsx';
 import TextInput from '../../components/ui/TextInput.jsx';
-import AuthLayout from './_layout.jsx';
+import { AuthScreenLayout } from './_layout.jsx';
 import BackButton from '../../components/ui/BackButton.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { AuthNavigationButtons } from '../../components/navigation/AuthNavigation.jsx';
+import { useSlideNavigation } from '../../hooks/useSlideNavigation';
+import { useRouter } from 'expo-router';
+import { supabase } from '../../lib/supabase';
 
 export default function SignIn() {
-  const { signIn, loading, handleNavigation, showToast } = useAuth();
+  const { signIn, loading, showToast } = useAuth();
+  const { goBack } = useSlideNavigation();
+  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState({ username: false, password: false });
@@ -28,6 +34,45 @@ export default function SignIn() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const checkSetupStatus = async (userId) => {
+    try {
+      // Check if gym location is set
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gym_location_set')
+        .eq('id', userId)
+        .single();
+
+      // Check if workout plan exists
+      const { data: workoutPlan, error: workoutError } = await supabase
+        .from('workout_plans')
+        .select('id')
+        .eq('profile_id', userId)
+        .limit(1);
+
+      if (workoutError) {
+        console.error('Error checking workout plan:', workoutError);
+        throw workoutError;
+      }
+
+      // If no gym location is set, start with gym location setup
+      if (!profile?.gym_location_set) {
+        router.replace('/(setup)/SelectGymLocation');
+      }
+      // If gym location is set but no workout plan exists, go to workout plan setup
+      else if (!workoutPlan || workoutPlan.length === 0) {
+        router.replace('/(setup)/InitializeWorkoutPlan');
+      }
+      // If both are set, go to home
+      else {
+        router.replace('/(tabs)/TreeHome');
+      }
+    } catch (error) {
+      console.error('Error checking setup status:', error);
+      showToast('Error checking account setup status');
+    }
+  };
+
   const handleSignIn = async () => {
     if (!validateForm()) {
       setTouched({ username: true, password: true });
@@ -44,6 +89,12 @@ export default function SignIn() {
         setErrors(prev => ({ ...prev, username: '' }));
       } else {
         showToast('Username not found. Please check your username or try signing in with your email.');
+      }
+    } else if (result?.success) {
+      // Get the current user and check setup status
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await checkSetupStatus(user.id);
       }
     }
   };
@@ -64,8 +115,8 @@ export default function SignIn() {
 
   return (
     <>
-      <BackButton onPress={() => handleNavigation('welcome')} />
-      <AuthLayout title="Sign In" showTitle={true}>
+      <BackButton onPress={goBack} />
+      <AuthScreenLayout title="Sign In" showTitle={true}>
         <TextInput
           label={isEmailMode ? "Email" : "Username"}
           placeholder={isEmailMode ? "Enter your email" : "Enter your username"}
@@ -122,15 +173,8 @@ export default function SignIn() {
           disabled={loading}
         />
 
-        <TouchableOpacity 
-          onPress={() => handleNavigation('signup')}
-          className="mt-12 py-3"
-        >
-          <Text className="text-center text-[#556B2F] text-lg font-medium">
-            Don't have an account? Sign up
-          </Text>
-        </TouchableOpacity>
-      </AuthLayout>
+        <AuthNavigationButtons showBack={false} switchTo="signup" />
+      </AuthScreenLayout>
     </>
   );
 } 

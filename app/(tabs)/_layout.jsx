@@ -29,28 +29,26 @@ export default function TabsLayout() {
     return <Redirect href="/" />;
   }
 
-  const defaultTabBarStyle = {
-    borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    display: 'flex',
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    elevation: 8,
-    backgroundColor: 'white',
-    height: 85,
-    paddingBottom: 25,
-    paddingTop: 5,
-  };
-
   return (
     <Tabs 
       screenOptions={{ 
         headerShown: false,
         tabBarActiveTintColor: '#556B2F',
         tabBarInactiveTintColor: '#9CA3AF',
-        tabBarStyle: defaultTabBarStyle
+        tabBarStyle: {
+          borderTopWidth: 1,
+          borderTopColor: '#E5E7EB',
+          display: 'flex',
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          elevation: 8,
+          backgroundColor: 'white',
+          height: 85,
+          paddingBottom: 25,
+          paddingTop: 5,
+        }
       }}
     >
       <Tabs.Screen
@@ -87,7 +85,6 @@ export default function TabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar" size={size} color={color} />
           ),
-          tabBarStyle: defaultTabBarStyle // Use the same style for consistency
         }}
       />
     </Tabs>
