@@ -45,7 +45,7 @@ module.exports = {
     [
       "expo-location",
       {
-        locationAlwaysAndWhenInUsePermission: "Allow FitForest to use your location to find nearby gyms."
+        locationWhenInUsePermission: "Allow FitForest to use your location to find nearby gyms."
       }
     ]
   ]

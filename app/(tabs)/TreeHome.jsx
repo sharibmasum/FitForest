@@ -1,21 +1,43 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, SafeAreaView } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, SafeAreaView, RefreshControl, TouchableOpacity } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { Ionicons } from '@expo/vector-icons';
-import WorkoutVerification from '../../components/WorkoutVerification';
 import { useWorkoutVerification } from '../../hooks/useWorkoutVerification';
-import { useFocusEffect } from 'expo-router';
+import { ScrollView } from 'react-native-gesture-handler';
+import { AppState } from 'react-native';
+import * as Location from 'expo-location';
+import LocationStatus from '../../components/tree-home/LocationStatus';
+import StreakDisplay from '../../components/tree-home/StreakDisplay';
+import LocationPermissionModal from '../../components/tree-home/LocationPermissionModal';
+import WorkoutVerificationModal from '../../components/tree-home/WorkoutVerificationModal';
+import TreeAnimation from '../../components/tree-home/TreeAnimation';
 
 export default function TreeHome() {
   const { user } = useAuth();
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
-  const { location, isInGymRange } = useWorkoutVerification();
+  const [refreshing, setRefreshing] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [showWorkoutModal, setShowWorkoutModal] = useState(false);
+  const permissionRequested = useRef(false);
+  const { 
+    location, 
+    isInGymRange, 
+    fetchWorkoutPlan, 
+    forceRefresh, 
+    isWorkoutTime,
+    currentWorkoutPlan,
+    isLocationLoading,
+    errorMsg,
+    initializeLocationTracking,
+    forceLocationCheck
+  } = useWorkoutVerification();
+  
+  const isActiveWorkoutTime = isWorkoutTime && !!currentWorkoutPlan;
 
   const fetchProfile = async () => {
     try {
-      setLoading(true);
       const { data, error } = await supabase
         .from('profiles')
         .select('current_streak, longest_streak')
@@ -24,92 +46,188 @@ export default function TreeHome() {
 
       if (error) throw error;
       setProfile(data);
+      setLoading(false);
     } catch (error) {
       console.error('Error fetching profile:', error);
-    } finally {
       setLoading(false);
     }
   };
 
-  // Refresh data whenever the tab is focused
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchProfile();
-    }, [])
-  );
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const refreshPromises = [
+        forceRefresh(),
+        fetchProfile(),
+        forceLocationCheck()
+      ];
+      
+      await Promise.all(refreshPromises);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [forceRefresh, fetchProfile, forceLocationCheck]);
 
-  // Initial load and periodic refresh
+  // Check location permissions and initialize tracking
   useEffect(() => {
-    fetchProfile();
-    // Set up profile refresh interval
-    const intervalId = setInterval(fetchProfile, 30000); // Refresh every 30 seconds
-    return () => clearInterval(intervalId);
-  }, []);
-
-  const getLastLocationUpdate = () => {
-    if (!location) return 'Waiting for location...';
-    const lastUpdate = new Date(location.timestamp);
-    const now = new Date();
-    const diffSeconds = Math.floor((now - lastUpdate) / 1000);
+    let isMounted = true;
     
-    if (diffSeconds < 10) return 'Just now';
-    if (diffSeconds < 60) return `${diffSeconds} seconds ago`;
-    if (diffSeconds < 3600) return `${Math.floor(diffSeconds / 60)} minutes ago`;
-    return `${Math.floor(diffSeconds / 3600)} hours ago`;
-  };
+    const checkLocationPermission = async () => {
+      try {
+        if (permissionRequested.current) return;
+        permissionRequested.current = true;
+
+        const { status } = await Location.getForegroundPermissionsAsync();
+        
+        if (!isMounted) return;
+
+        if (status !== 'granted') {
+          setShowLocationModal(true);
+        } else {
+          setShowLocationModal(false);
+          if (typeof initializeLocationTracking === 'function') {
+            await initializeLocationTracking();
+          }
+        }
+      } catch (error) {
+        console.error('Error checking location permission:', error);
+        if (isMounted) {
+          setShowLocationModal(true);
+        }
+      }
+    };
+    
+    checkLocationPermission();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [initializeLocationTracking]);
+
+  // Set up subscription to profile changes
+  useEffect(() => {
+    if (!user) return;
+
+    const profileSubscription = supabase
+      .channel('profile_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${user.id}`
+        },
+        (payload) => {
+          setProfile(payload.new);
+        }
+      )
+      .subscribe();
+
+    Promise.all([
+      fetchProfile(),
+      fetchWorkoutPlan()
+    ]).catch(error => {
+      console.error('Error in initial fetch:', error);
+    });
+
+    return () => {
+      profileSubscription.unsubscribe();
+    };
+  }, [user.id, fetchWorkoutPlan]);
+
+  useEffect(() => {
+    const updateInterval = setInterval(async () => {
+      await fetchProfile();
+    }, 300000);
+
+    return () => clearInterval(updateInterval);
+  }, [fetchProfile]);
+
+  useEffect(() => {
+    const appState = { current: AppState.currentState };
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        const now = new Date();
+        const lastUpdate = new Date(appState.current === 'background' ? appState.lastUpdate : now);
+        const timeSinceLastUpdate = now - lastUpdate;
+        
+        if (timeSinceLastUpdate > 300000) {
+          Promise.all([
+            forceRefresh(),
+            fetchProfile()
+          ]).catch(error => {
+            console.error('Error refreshing data on app state change:', error);
+          });
+        }
+      }
+      appState.current = nextAppState;
+      appState.lastUpdate = new Date();
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [forceRefresh, fetchProfile]);
 
   return (
     <SafeAreaView className="flex-1 bg-white">
-      <View className="flex-1 p-4">
-        <Text className="text-3xl font-bold text-[#556B2F] mb-2">
+      <View className="flex-row justify-between items-center px-4 py-2">
+        <Text className="text-3xl font-bold text-[#556B2F]">
           Your Forest
         </Text>
-        <Text className="text-gray-600 mb-6">
-          Welcome {user?.user_metadata?.username}
-        </Text>
-        
-        {/* Location Status */}
-        <View className="bg-[#F8F9FA] p-3 rounded-lg mb-4 flex-row items-center">
-          <View className={`w-2 h-2 rounded-full mr-2 ${location ? 'bg-green-500' : 'bg-gray-400'}`} />
-          <View className="flex-1">
-            <Text className="text-sm text-gray-600">
-              Location Status: {getLastLocationUpdate()}
-            </Text>
-            {location && (
-              <Text className="text-xs text-gray-500">
-                {isInGymRange ? '✓ At gym location' : '• Not at gym location'}
-              </Text>
-            )}
-          </View>
-        </View>
-        
-        {/* Streak Display */}
-        <View className="bg-[#F5F8F2] p-4 rounded-xl mb-6 flex-row justify-between items-center">
-          <View>
-            <Text className="text-lg font-semibold text-[#556B2F] mb-1">
-              Current Streak
-            </Text>
-            <View className="flex-row items-center">
-              <Ionicons name="flame" size={24} color="#FF6B2F" />
-              <Text className="text-3xl font-bold text-[#556B2F] ml-2">
-                {loading ? '...' : profile?.current_streak || 0}
-              </Text>
-              <Text className="text-lg text-gray-600 ml-2">days</Text>
-            </View>
-          </View>
-          <View>
-            <Text className="text-sm text-gray-600 text-right mb-1">
-              Longest Streak
-            </Text>
-            <Text className="text-lg font-semibold text-[#556B2F] text-right">
-              {loading ? '...' : profile?.longest_streak || 0} days
-            </Text>
-          </View>
-        </View>
-
-        {/* Workout Verification Status */}
-        <WorkoutVerification />
+        <TouchableOpacity 
+          onPress={() => setShowWorkoutModal(true)}
+          className="p-2"
+        >
+          <Ionicons name="fitness-outline" size={24} color="#556B2F" />
+        </TouchableOpacity>
       </View>
+      <ScrollView 
+        className="flex-1"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#556B2F"
+            title="Pull to refresh"
+            titleColor="#556B2F"
+          />
+        }
+      >
+        <View className="flex-1 p-4">
+          <Text className="text-gray-600 mb-6">
+            Welcome {user?.user_metadata?.username}
+          </Text>
+          
+          <LocationStatus
+            location={location}
+            isInGymRange={isInGymRange}
+            isActiveWorkoutTime={isActiveWorkoutTime}
+            isLocationLoading={isLocationLoading || refreshing}
+            errorMsg={errorMsg}
+          />
+          
+          <StreakDisplay
+            loading={loading}
+            profile={profile}
+          />
+          
+          <TreeAnimation streak={profile?.current_streak || 0} />
+        </View>
+      </ScrollView>
+
+      <LocationPermissionModal
+        visible={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+      />
+
+      <WorkoutVerificationModal
+        visible={showWorkoutModal}
+        onClose={() => setShowWorkoutModal(false)}
+      />
     </SafeAreaView>
   );
 }

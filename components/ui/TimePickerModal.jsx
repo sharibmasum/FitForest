@@ -15,6 +15,18 @@ export default function TimePickerModal({
   // For Android, we don't render anything here as the native picker is shown directly
   if (!showTimePicker || Platform.OS !== 'ios') return null;
 
+  const getDateFromTimeString = (timeString) => {
+    try {
+      const [hours, minutes] = timeString.split(':');
+      const date = new Date();
+      date.setHours(parseInt(hours), parseInt(minutes));
+      return date;
+    } catch (error) {
+      console.error('Error parsing time:', error);
+      return new Date();
+    }
+  };
+
   return (
     <Animated.View 
       className="absolute left-0 right-0 bg-white border-t border-gray-200"
@@ -42,12 +54,7 @@ export default function TimePickerModal({
         </TouchableOpacity>
       </View>
       <DateTimePicker
-        value={(() => {
-          const [hours, minutes] = (timePickerMode === 'start' ? tempTime.start : tempTime.end).split(':');
-          const date = new Date();
-          date.setHours(parseInt(hours), parseInt(minutes));
-          return date;
-        })()}
+        value={getDateFromTimeString(timePickerMode === 'start' ? tempTime.start : tempTime.end)}
         mode="time"
         is24Hour={false}
         display="spinner"

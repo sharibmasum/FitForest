@@ -10,6 +10,7 @@ import BackButton from '../../components/ui/BackButton';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from '../../components/ui/Toast';
 import { useSlideNavigation } from '../../hooks/useSlideNavigation';
+import ConfirmationModal from '../../components/ui/ConfirmationModal';
 
 export default function ChangeGymLocation() {
   const router = useRouter();
@@ -21,6 +22,48 @@ export default function ChangeGymLocation() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [toast, setToast] = useState(null);
+  const [mapRegion, setMapRegion] = useState(null);
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+
+  const calculateMapRegion = (userLocation, gymLocation) => {
+    if (!userLocation || !userLocation.coords) return null;
+
+    const locations = [userLocation.coords];
+    if (gymLocation) {
+      locations.push(gymLocation);
+    }
+
+    // Calculate bounds
+    const latitudes = locations.map(loc => loc.latitude);
+    const longitudes = locations.map(loc => loc.longitude);
+    
+    const minLat = Math.min(...latitudes);
+    const maxLat = Math.max(...latitudes);
+    const minLng = Math.min(...longitudes);
+    const maxLng = Math.max(...longitudes);
+
+    // Calculate center
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+
+    // Calculate deltas with padding
+    const latDelta = (maxLat - minLat) * 1.5; // 50% padding
+    const lngDelta = (maxLng - minLng) * 1.5; // 50% padding
+
+    return {
+      latitude: centerLat,
+      longitude: centerLng,
+      latitudeDelta: Math.max(latDelta, 0.02), // Minimum zoom level
+      longitudeDelta: Math.max(lngDelta, 0.02), // Minimum zoom level
+    };
+  };
+
+  useEffect(() => {
+    if (location && (currentGym || selectedGym)) {
+      const region = calculateMapRegion(location, selectedGym || currentGym);
+      setMapRegion(region);
+    }
+  }, [location, currentGym, selectedGym]);
 
   useEffect(() => {
     (async () => {
@@ -71,7 +114,22 @@ export default function ChangeGymLocation() {
       return;
     }
 
+    setShowConfirmationModal(true);
+  };
+
+  const handleConfirmGymChange = async () => {
     try {
+      // Reset streak to 0
+      const { error: streakError } = await supabase
+        .from('profiles')
+        .update({
+          current_streak: 0
+        })
+        .eq('id', user.id);
+
+      if (streakError) throw streakError;
+
+      // Update gym location
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -86,6 +144,8 @@ export default function ChangeGymLocation() {
         message: 'Gym location updated successfully!',
         type: 'success'
       });
+      
+      setShowConfirmationModal(false);
       
       // Wait for toast to be visible before navigating back
       setTimeout(() => {
@@ -177,12 +237,8 @@ export default function ChangeGymLocation() {
             {location && location.coords && (
               <MapView
                 style={styles.map}
-                initialRegion={{
-                  latitude: location.coords.latitude,
-                  longitude: location.coords.longitude,
-                  latitudeDelta: 0.02,
-                  longitudeDelta: 0.02,
-                }}
+                initialRegion={mapRegion}
+                region={mapRegion}
                 onPress={handleMapPress}
                 showsUserLocation={true}
                 showsMyLocationButton={true}
@@ -228,6 +284,21 @@ export default function ChangeGymLocation() {
             </TouchableOpacity>
           </View>
         </SafeAreaView>
+
+        {/* Confirmation Modal */}
+        <ConfirmationModal
+          visible={showConfirmationModal}
+          onClose={() => setShowConfirmationModal(false)}
+          onConfirm={handleConfirmGymChange}
+          title="Warning: Streak Reset"
+          message="Changing your gym location will reset your current streak to 0. Are you sure you want to proceed?"
+          confirmText="Confirm"
+          cancelText="Cancel"
+          icon="warning"
+          iconColor="#EF4444"
+          confirmButtonColor="#556B2F"
+          cancelButtonColor="gray-200"
+        />
       </SafeAreaView>
     </View>
   );

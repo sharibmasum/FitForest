@@ -156,7 +156,6 @@ export function AuthProvider({ children }) {
         throw new Error('Failed to create user');
       }
 
-      showToast('Account created successfully!', 'success');
       return { success: true };
     } catch (error) {
       console.error('SignUp Error:', error.message);

@@ -5,15 +5,14 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useWorkoutPlan } from './useWorkoutPlan';
 
-const LOCATION_TASK_NAME = 'background-location-task';
 const GYM_RADIUS_METERS = 100; 
-const LOCATION_UPDATE_INTERVAL = 5000; 
-const VERIFICATION_INTERVAL = 30000;
-const ACCURACY_THRESHOLD = 50; 
+const LOCATION_UPDATE_INTERVAL = 30000;
+const VERIFICATION_INTERVAL = 60000;
+const ACCURACY_THRESHOLD = 500;
 
 export function useWorkoutVerification() {
   const { user } = useAuth();
-  const { workoutPlan, fetchWorkoutPlan } = useWorkoutPlan();
+  const { workoutPlan, fetchWorkoutPlan: fetchPlan } = useWorkoutPlan();
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [isInGymRange, setIsInGymRange] = useState(false);
@@ -22,13 +21,85 @@ export function useWorkoutVerification() {
   const [lastVerificationTime, setLastVerificationTime] = useState(null);
   const [distanceToGym, setDistanceToGym] = useState(null);
   const [locationAccuracy, setLocationAccuracy] = useState(null);
+  const [isLocationLoading, setIsLocationLoading] = useState(true);
   const locationSubscription = useRef(null);
   const verificationInterval = useRef(null);
   const appState = useRef(AppState.currentState);
 
-  // Calculate distance between two points using Haversine formula
+  const checkWorkoutTime = useCallback((plan) => {
+    if (!plan || !plan.start_time || !plan.end_time) return false;
+    
+    const now = new Date();
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDay = days[now.getDay()];
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    
+    const [startHours, startMinutes] = plan.start_time.split(':').map(Number);
+    const [endHours, endMinutes] = plan.end_time.split(':').map(Number);
+    const planStartMinutes = startHours * 60 + startMinutes;
+    const planEndMinutes = endHours * 60 + endMinutes;
+    
+    return plan.day === currentDay && currentMinutes >= planStartMinutes && currentMinutes <= planEndMinutes;
+  }, []);
+
+  const fetchWorkoutPlan = useCallback(async () => {
+    try {
+      await fetchPlan();
+      const now = new Date();
+      const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const currentDay = days[now.getDay()];
+      const todaysPlan = workoutPlan?.find(plan => plan.day === currentDay);
+
+      if (!todaysPlan) {
+        setIsWorkoutTime(false);
+        setCurrentWorkoutPlan(null);
+        setLastVerificationTime(null);
+        return;
+      }
+
+      const isWithinTime = checkWorkoutTime(todaysPlan);
+      setCurrentWorkoutPlan(todaysPlan);
+      setIsWorkoutTime(isWithinTime);
+      if (isWithinTime) {
+        setLastVerificationTime(new Date());
+      }
+    } catch (error) {
+      console.error('Error in fetchWorkoutPlan:', error);
+      setIsWorkoutTime(false);
+      setCurrentWorkoutPlan(null);
+      setLastVerificationTime(null);
+    }
+  }, [workoutPlan, checkWorkoutTime, fetchPlan]);
+
+  const forceRefresh = useCallback(async () => {
+    setLastVerificationTime(null);
+    await fetchWorkoutPlan();
+  }, [fetchWorkoutPlan]);
+
+  const forceLocationCheck = useCallback(async () => {
+    try {
+      setIsLocationLoading(true);
+      setErrorMsg(null);
+
+      // Get current location with high accuracy
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        timeout: 5000,
+      });
+      
+      setLocation(currentLocation);
+      setLocationAccuracy(currentLocation.coords.accuracy);
+      await checkGymProximity(currentLocation.coords);
+      setIsLocationLoading(false);
+    } catch (error) {
+      console.error('Error forcing location check:', error);
+      setErrorMsg('Error getting current location');
+      setIsLocationLoading(false);
+    }
+  }, [checkGymProximity]);
+
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3; // Earth's radius in meters
+    const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
     const φ2 = (lat2 * Math.PI) / 180;
     const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -39,79 +110,79 @@ export function useWorkoutVerification() {
               Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return R * c; // Distance in meters
+    return R * c;
   };
 
-  // Check if current time is within workout hours
-  const checkWorkoutTime = useCallback((plan) => {
-    if (!plan) return false;
-    
-    const now = new Date();
-    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const currentDay = days[now.getDay()];
-    
-    // Convert current time to 24-hour format
-    const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(2, '0');
-    const currentTime = `${hours}:${minutes}`;
-    
-    const isCorrectDay = plan.day === currentDay;
-    const isWithinTime = currentTime >= plan.start_time && currentTime <= plan.end_time;
-    
-    console.log('Time check:', {
-      currentDay,
-      planDay: plan.day,
-      currentTime,
-      startTime: plan.start_time,
-      endTime: plan.end_time,
-      isCorrectDay,
-      isWithinTime
-    });
-    
-    return isCorrectDay && isWithinTime;
-  }, []);
-
-
-  const initializeLocationTracking = async () => {
+  const initializeLocationTracking = async (force = false) => {
     try {
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      if (foregroundStatus !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
+      // If we already have a location and a subscription, and not forcing, don't reinitialize
+      if (location && locationSubscription.current && !force) {
+        setIsLocationLoading(false);
         return;
       }
+      
+      setIsLocationLoading(true);
+      setErrorMsg(null);
 
-
-      if (locationSubscription.current) {
-        locationSubscription.current.remove();
+      // Check if we already have permission before requesting
+      const { status: currentStatus } = await Location.getForegroundPermissionsAsync();
+      
+      if (currentStatus !== 'granted') {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          setErrorMsg('Permission to access location was denied');
+          setIsLocationLoading(false);
+          return;
+        }
       }
 
- 
+      // Clear any existing subscription before creating a new one
+      if (locationSubscription.current) {
+        await locationSubscription.current.remove();
+        locationSubscription.current = null;
+      }
+
+      // Get initial location with balanced accuracy
+      try {
+        const initialLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+          timeout: 5000,
+        });
+        
+        setLocation(initialLocation);
+        setLocationAccuracy(initialLocation.coords.accuracy);
+        checkGymProximity(initialLocation.coords);
+        setIsLocationLoading(false);
+      } catch (error) {
+        console.warn('Initial location fetch failed:', error);
+        setIsLocationLoading(false);
+      }
+
+      // Start watching for updates with balanced accuracy
       const subscription = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.BestForNavigation,
+          accuracy: Location.Accuracy.Balanced,
           timeInterval: LOCATION_UPDATE_INTERVAL,
-          distanceInterval: 5, 
-          mayShowUserSettingsDialog: true, 
+          distanceInterval: 100,
         },
         (newLocation) => {
           if (newLocation.coords.accuracy <= ACCURACY_THRESHOLD) {
             setLocation(newLocation);
             setLocationAccuracy(newLocation.coords.accuracy);
             checkGymProximity(newLocation.coords);
-          } else {
-            console.log('Location accuracy too low:', newLocation.coords.accuracy);
+            setIsLocationLoading(false);
           }
         }
       );
 
       locationSubscription.current = subscription;
     } catch (error) {
-      setErrorMsg('Error initializing location tracking');
-      console.error(error);
+      console.error('Error initializing location tracking:', error);
+      setErrorMsg('Error initializing location tracking. Please check your location settings.');
+      setIsLocationLoading(false);
     }
   };
 
- 
   const checkGymProximity = useCallback(async (currentCoords) => {
     if (!user) return;
 
@@ -132,92 +203,50 @@ export function useWorkoutVerification() {
         );
 
         setDistanceToGym(distance);
-        const isInRange = distance <= GYM_RADIUS_METERS;
-
-        console.log('Distance check:', {
-          currentLocation: {
-            latitude: currentCoords.latitude.toFixed(6),
-            longitude: currentCoords.longitude.toFixed(6),
-            accuracy: currentCoords.accuracy
-          },
-          gymLocation: {
-            latitude: gymLocation.latitude.toFixed(6),
-            longitude: gymLocation.longitude.toFixed(6)
-          },
-          distance: Math.round(distance),
-          isInRange,
-          accuracy: currentCoords.accuracy
-        });
-
-        setIsInGymRange(isInRange);
+        setIsInGymRange(distance <= GYM_RADIUS_METERS);
       }
     } catch (error) {
       console.error('Error checking gym proximity:', error);
     }
   }, [user]);
 
-  
-  const checkWorkoutCompletion = async (workoutPlanId) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const { data, error } = await supabase
-      .from('completed_workouts')
-      .select('*')
-      .eq('profile_id', user.id)
-      .eq('workout_plan_id', workoutPlanId)
-      .gte('completed_at', today.toISOString())
-      .lt('completed_at', new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString());
-
-    if (error) {
-      console.error('Error checking workout completion:', error);
-      return true; 
-    }
-
-    return data && data.length > 0;
-  };
-
-
   const verifyWorkout = useCallback(async () => {
-    console.log('Starting workout verification:', {
-      hasUser: !!user,
-      isInGymRange,
-      isWorkoutTime,
-      currentWorkoutPlan
-    });
-
-    if (!user || !isInGymRange || !isWorkoutTime || !currentWorkoutPlan) {
-      console.log('Verification conditions not met');
-      return;
-    }
-
-    const now = new Date();
-    if (lastVerificationTime && (now - lastVerificationTime) < VERIFICATION_INTERVAL) {
-      console.log('Too soon since last verification attempt');
-      return;
-    }
-
-    setLastVerificationTime(now);
+    if (!user || !currentWorkoutPlan || !isWorkoutTime || !isInGymRange) return;
 
     try {
-      const alreadyCompleted = await checkWorkoutCompletion(currentWorkoutPlan.id);
-      if (alreadyCompleted) {
-        console.log('Workout already completed today');
+      const { data: plan, error: planError } = await supabase
+        .from('workout_plans')
+        .select('id')
+        .eq('id', currentWorkoutPlan.id)
+        .single();
+
+      if (planError || !plan) {
+        console.error('Workout plan not found:', currentWorkoutPlan.id);
         return;
       }
 
-      
-      const { data: completedWorkout, error: completionError } = await supabase
+      const today = new Date().toISOString().split('T')[0];
+      const { data: completedWorkouts, error: completedError } = await supabase
         .from('completed_workouts')
-        .insert([{
-          profile_id: user.id,
-          workout_plan_id: currentWorkoutPlan.id,
-          location_verified: true
-        }])
-        .select()
-        .single();
+        .select('*')
+        .eq('profile_id', user.id)
+        .gte('created_at', `${today}T00:00:00`)
+        .lte('created_at', `${today}T23:59:59`);
 
-      if (completionError) throw completionError;
+      if (completedError) throw completedError;
+      if (completedWorkouts?.length > 0) return;
+
+      const { error: insertError } = await supabase
+        .from('completed_workouts')
+        .insert([
+          {
+            profile_id: user.id,
+            workout_plan_id: currentWorkoutPlan.id,
+            completed_at: new Date().toISOString()
+          }
+        ]);
+
+      if (insertError) throw insertError;
 
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -227,45 +256,35 @@ export function useWorkoutVerification() {
 
       if (profileError) throw profileError;
 
-      const newCurrentStreak = profile.current_streak + 1;
-      const newLongestStreak = Math.max(newCurrentStreak, profile.longest_streak);
-
-      console.log('Updating streak:', {
-        oldStreak: profile.current_streak,
-        newStreak: newCurrentStreak,
-        newLongestStreak
-      });
+      const newStreak = (profile.current_streak || 0) + 1;
+      const newLongestStreak = Math.max(newStreak, profile.longest_streak || 0);
 
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
-          current_streak: newCurrentStreak,
+          current_streak: newStreak,
           longest_streak: newLongestStreak
         })
         .eq('id', user.id);
 
       if (updateError) throw updateError;
 
-      return completedWorkout;
+      setLastVerificationTime(new Date());
     } catch (error) {
       console.error('Error verifying workout:', error);
       throw error;
     }
-  }, [user, isInGymRange, isWorkoutTime, currentWorkoutPlan, lastVerificationTime]);
+  }, [user, currentWorkoutPlan, isWorkoutTime, isInGymRange]);
 
- 
   useEffect(() => {
     if (isInGymRange && isWorkoutTime && currentWorkoutPlan) {
-      // Clear any existing interval
       if (verificationInterval.current) {
         clearInterval(verificationInterval.current);
       }
 
- 
       verificationInterval.current = setInterval(() => {
         verifyWorkout();
       }, VERIFICATION_INTERVAL);
-
 
       verifyWorkout();
     }
@@ -277,6 +296,16 @@ export function useWorkoutVerification() {
     };
   }, [isInGymRange, isWorkoutTime, currentWorkoutPlan, verifyWorkout]);
 
+  useEffect(() => {
+    initializeLocationTracking();
+    fetchWorkoutPlan();
+
+    return () => {
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+      }
+    };
+  }, [fetchWorkoutPlan]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextAppState => {
@@ -298,45 +327,6 @@ export function useWorkoutVerification() {
     };
   }, []);
 
-  
-  useEffect(() => {
-    if (!workoutPlan || !location) return;
-
-    const now = new Date();
-    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const currentDay = days[now.getDay()];
-    const todaysPlan = workoutPlan.find(plan => plan.day === currentDay);
-
-    console.log('Checking workout status:', {
-      currentDay,
-      hasTodaysPlan: !!todaysPlan,
-      workoutPlan
-    });
-
-    if (todaysPlan) {
-      setCurrentWorkoutPlan(todaysPlan);
-      setIsWorkoutTime(checkWorkoutTime(todaysPlan));
-    } else {
-      setCurrentWorkoutPlan(null);
-      setIsWorkoutTime(false);
-    }
-  }, [workoutPlan, location, checkWorkoutTime]);
-
-
-  useEffect(() => {
-    initializeLocationTracking();
-    fetchWorkoutPlan();
-
-    return () => {
-      if (locationSubscription.current) {
-        locationSubscription.current.remove();
-      }
-      if (verificationInterval.current) {
-        clearInterval(verificationInterval.current);
-      }
-    };
-  }, []);
-
   return {
     location,
     errorMsg,
@@ -345,6 +335,10 @@ export function useWorkoutVerification() {
     currentWorkoutPlan,
     verifyWorkout,
     distanceToGym,
-    locationAccuracy
+    locationAccuracy,
+    fetchWorkoutPlan,
+    forceRefresh,
+    forceLocationCheck,
+    isLocationLoading
   };
 } 

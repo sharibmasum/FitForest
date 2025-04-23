@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
@@ -14,143 +14,109 @@ export const DAYS_OF_WEEK = [
 
 export function useWorkoutPlan() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const [workoutPlan, setWorkoutPlan] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Fetch workout plan for the current user
-  const fetchWorkoutPlan = useCallback(async () => {
+  const fetchWorkoutPlan = useCallback(async (force = false) => {
     if (!user) return;
-
+    
     try {
-      setLoading(true);
-      setError(null);
-
-      const { data, error } = await supabase
+      if (force) {
+        setIsRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      
+      const { data, error: fetchError } = await supabase
         .from('workout_plans')
         .select('*')
         .eq('profile_id', user.id)
-        .order('day');
+        .order('day', { ascending: true });
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
 
-      setWorkoutPlan(data || []);
+      if (data) {
+        setWorkoutPlan(data);
+        setError(null);
+      }
     } catch (err) {
-      console.error('Error fetching workout plan:', err);
       setError(err.message);
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, [user]);
 
-  // Add a workout day
-  const addWorkoutDay = useCallback(async ({ day, startTime, endTime }) => {
-    if (!user) return;
+  // Initial fetch
+  useEffect(() => {
+    fetchWorkoutPlan();
+  }, [fetchWorkoutPlan]);
 
+  const addWorkoutDay = async (dayData) => {
     try {
-      setLoading(true);
-      setError(null);
-
       const { data, error } = await supabase
         .from('workout_plans')
-        .insert([
-          {
-            profile_id: user.id,
-            day,
-            start_time: startTime,
-            end_time: endTime
-          }
-        ])
+        .insert([{ 
+          profile_id: user.id,
+          day: dayData.day,
+          start_time: dayData.start_time,
+          end_time: dayData.end_time
+        }])
         .select()
         .single();
 
       if (error) throw error;
-
-      setWorkoutPlan(current => [...current, data]);
+      await fetchWorkoutPlan(true);
       return data;
     } catch (err) {
-      console.error('Error adding workout day:', err);
-      setError(err.message);
-      return null;
-    } finally {
-      setLoading(false);
+      throw err;
     }
-  }, [user]);
+  };
 
-  // Update a workout day
-  const updateWorkoutDay = useCallback(async (id, { startTime, endTime }) => {
-    if (!user) return;
-
+  const updateWorkoutDay = async (id, updates) => {
     try {
-      setLoading(true);
-      setError(null);
-
       const { data, error } = await supabase
         .from('workout_plans')
         .update({
-          start_time: startTime,
-          end_time: endTime
+          start_time: updates.start_time,
+          end_time: updates.end_time
         })
         .eq('id', id)
-        .eq('profile_id', user.id)
         .select()
         .single();
 
       if (error) throw error;
-
-      setWorkoutPlan(current =>
-        current.map(plan => (plan.id === id ? data : plan))
-      );
+      await fetchWorkoutPlan(true);
       return data;
     } catch (err) {
-      console.error('Error updating workout day:', err);
-      setError(err.message);
-      return null;
-    } finally {
-      setLoading(false);
+      throw err;
     }
-  }, [user]);
+  };
 
-  // Delete a workout day
-  const deleteWorkoutDay = useCallback(async (id) => {
-    if (!user) return;
-
+  const deleteWorkoutDay = async (id) => {
     try {
-      setLoading(true);
-      setError(null);
-
       const { error } = await supabase
         .from('workout_plans')
         .delete()
-        .eq('id', id)
-        .eq('profile_id', user.id);
+        .eq('id', id);
 
       if (error) throw error;
-
-      setWorkoutPlan(current => current.filter(plan => plan.id !== id));
-      return true;
+      await fetchWorkoutPlan(true);
     } catch (err) {
-      console.error('Error deleting workout day:', err);
-      setError(err.message);
-      return false;
-    } finally {
-      setLoading(false);
+      throw err;
     }
-  }, [user]);
-
-  // Clear error
-  const clearError = useCallback(() => {
-    setError(null);
-  }, []);
+  };
 
   return {
     workoutPlan,
     loading,
     error,
+    isRefreshing,
     fetchWorkoutPlan,
     addWorkoutDay,
     updateWorkoutDay,
-    deleteWorkoutDay,
-    clearError,
+    deleteWorkoutDay
   };
 } 

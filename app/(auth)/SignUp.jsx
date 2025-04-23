@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import { AuthNavigationButtons } from '../../components/navigation/AuthNavigation.jsx';
 import { useSlideNavigation } from '../../hooks/useSlideNavigation';
 import { useRouter } from 'expo-router';
+import Toast from '../../components/ui/Toast';
 
 export default function SignUp() {
   const { signUp, loading } = useAuth();
@@ -29,6 +30,7 @@ export default function SignUp() {
     password: '',
     confirmPassword: '' 
   });
+  const [showToast, setShowToast] = useState(false);
 
   const validateForm = () => {
     const newErrors = {};
@@ -61,7 +63,10 @@ export default function SignUp() {
     }
     const result = await signUp(username, email, password);
     if (result?.success) {
-      router.replace('/(setup)/SelectGymLocation');
+      setShowToast(true);
+      setTimeout(() => {
+        router.replace('/(auth)/SignIn');
+      }, 3000);
     }
   };
 
@@ -125,6 +130,14 @@ export default function SignUp() {
 
         <AuthNavigationButtons showBack={false} switchTo="signin" />
       </AuthScreenLayout>
+
+      {showToast && (
+        <Toast
+          message="Please check your email to confirm your account. Once confirmed, you can sign in."
+          type="success"
+          onHide={() => setShowToast(false)}
+        />
+      )}
     </>
   );
 } 

@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useWorkoutVerification } from '../hooks/useWorkoutVerification';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 
 export default function WorkoutVerification() {
+  const { user } = useAuth();
   const {
     location,
     errorMsg,
@@ -10,11 +13,42 @@ export default function WorkoutVerification() {
     isWorkoutTime,
     currentWorkoutPlan,
     distanceToGym,
-    locationAccuracy
+    locationAccuracy,
+    forceRefresh,
+    isLocationLoading
   } = useWorkoutVerification();
 
-  const [verificationStatus, setVerificationStatus] = useState('waiting');
-  const [verificationMessage, setVerificationMessage] = useState('');
+  useEffect(() => {
+    if (!user) return;
+
+    const subscription = supabase
+      .channel('workout_plan_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'workout_plans',
+          filter: `profile_id=eq.${user.id}`
+        },
+        async () => {
+          // Debounce the refresh to prevent multiple rapid updates
+          const now = new Date();
+          const lastRefresh = new Date(subscription.lastRefresh || 0);
+          const timeSinceLastRefresh = now - lastRefresh;
+          
+          if (timeSinceLastRefresh > 5000) { // Only refresh if 5 seconds have passed
+            await forceRefresh();
+            subscription.lastRefresh = now;
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user, forceRefresh]);
 
   const formatDistance = (meters) => {
     if (meters === null) return 'Calculating...';
@@ -24,29 +58,46 @@ export default function WorkoutVerification() {
     return `${(meters / 1000).toFixed(1)}km`;
   };
 
-  useEffect(() => {
-    if (!location) {
-      setVerificationStatus('waiting');
-      setVerificationMessage('Waiting for location...');
-    } else if (!isInGymRange) {
-      setVerificationStatus('waiting');
-      setVerificationMessage(`You need to be within 100m of your gym (Currently ${formatDistance(distanceToGym)} away)`);
-    } else if (!isWorkoutTime || !currentWorkoutPlan) {
-      setVerificationStatus('info');
-      setVerificationMessage('No scheduled workout at this time');
-    } else {
-      setVerificationStatus('active');
-      setVerificationMessage("You're at the gym during your workout time! Your streak will update automatically.");
-    }
-  }, [location, isInGymRange, isWorkoutTime, currentWorkoutPlan, distanceToGym]);
+  const isActiveWorkoutTime = isWorkoutTime && !!currentWorkoutPlan;
 
-  if (errorMsg) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>{errorMsg}</Text>
-      </View>
-    );
-  }
+  const getVerificationStatus = () => {
+    if (errorMsg) {
+      return {
+        status: 'error',
+        message: errorMsg
+      };
+    }
+    if (isLocationLoading) {
+      return {
+        status: 'waiting',
+        message: 'Getting location...'
+      };
+    }
+    if (!location) {
+      return {
+        status: 'waiting',
+        message: 'Waiting for location...'
+      };
+    }
+    if (!isInGymRange) {
+      return {
+        status: 'waiting',
+        message: `You need to be within 100m of your gym (Currently ${formatDistance(distanceToGym)} away)`
+      };
+    }
+    if (!isActiveWorkoutTime) {
+      return {
+        status: 'info',
+        message: 'No scheduled workout at this time'
+      };
+    }
+    return {
+      status: 'active',
+      message: "You're at the gym during your workout time! Your streak will update automatically."
+    };
+  };
+
+  const { status: verificationStatus, message: verificationMessage } = getVerificationStatus();
 
   return (
     <View style={styles.container}>
@@ -54,34 +105,36 @@ export default function WorkoutVerification() {
         <StatusIndicator
           label="Location"
           isActive={!!location}
-          message={location ? `Tracking (±${Math.round(locationAccuracy)}m accuracy)` : 'Waiting for location...'}
+          message={location ? `Tracking (±${Math.round(locationAccuracy)}m accuracy)` : isLocationLoading ? 'Getting location...' : 'Waiting for location...'}
           details={location ? `Lat: ${location.coords.latitude.toFixed(6)}, Lon: ${location.coords.longitude.toFixed(6)}` : null}
         />
         <StatusIndicator
           label="Gym Range"
           isActive={isInGymRange}
           message={isInGymRange ? 'In range' : `${formatDistance(distanceToGym)} from gym`}
-          details={distanceToGym ? `Need to be within 200m (Currently ${formatDistance(distanceToGym)} away)` : null}
+          details={distanceToGym ? `Need to be within 100m (Currently ${formatDistance(distanceToGym)} away)` : null}
         />
         <StatusIndicator
           label="Workout Time"
-          isActive={isWorkoutTime}
-          message={isWorkoutTime ? 'Active workout time' : 'Outside workout hours'}
-          details={currentWorkoutPlan ? `Scheduled: ${currentWorkoutPlan.start_time} - ${currentWorkoutPlan.end_time}` : 'No workout scheduled'}
+          isActive={isActiveWorkoutTime}
+          message={isActiveWorkoutTime ? 'Active workout time' : 'Outside workout hours'}
+          details={isActiveWorkoutTime ? 
+            `Scheduled: ${currentWorkoutPlan.start_time.split(':').slice(0,2).join(':')} - ${currentWorkoutPlan.end_time.split(':').slice(0,2).join(':')}` : 
+            'No workout scheduled for today'}
         />
       </View>
 
       <View style={[
         styles.messageContainer,
-        verificationStatus === 'active' && styles.successContainer,
-        verificationStatus === 'error' && styles.errorContainer,
-        verificationStatus === 'info' && styles.infoContainer,
+        verificationStatus === 'active' ? styles.successContainer : 
+        verificationStatus === 'error' ? styles.errorContainer : 
+        styles.infoContainer,
       ]}>
         <Text style={[
           styles.messageText,
-          verificationStatus === 'active' && styles.successText,
-          verificationStatus === 'error' && styles.errorText,
-          verificationStatus === 'info' && styles.infoText,
+          verificationStatus === 'active' ? styles.successText : 
+          verificationStatus === 'error' ? styles.errorText : 
+          styles.infoText,
         ]}>
           {verificationMessage}
         </Text>

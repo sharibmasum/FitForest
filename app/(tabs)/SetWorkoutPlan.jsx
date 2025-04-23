@@ -9,6 +9,7 @@ import DaySelector from '../../components/ui/DaySelector';
 import useTimePicker from '../../hooks/useTimePicker';
 import InfoModal from '../../components/ui/InfoModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import Toast from '../../components/ui/Toast';
 
 export default function SetWorkoutPlan() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export default function SetWorkoutPlan() {
   const [times, setTimes] = useState({});
   const [unsavedChanges, setUnsavedChanges] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
+  const [showToast, setShowToast] = useState(false);
 
   const {
     showTimePicker,
@@ -57,13 +59,19 @@ export default function SetWorkoutPlan() {
         };
       });
       setTimes(newTimes);
+    } else {
+      // Clear all selections when there's no workout plan
+      setSelectedDays(new Set());
+      setTimes({});
     }
   }, [workoutPlan]);
 
   const handleDayPress = async (day) => {
     if (selectedDays.has(day)) {
-      selectedDays.delete(day);
-      setSelectedDays(new Set(selectedDays));
+      const newSelectedDays = new Set(selectedDays);
+      newSelectedDays.delete(day);
+      setSelectedDays(newSelectedDays);
+      
       const newTimes = { ...times };
       delete newTimes[day];
       setTimes(newTimes);
@@ -81,18 +89,23 @@ export default function SetWorkoutPlan() {
 
   const handleCancelTime = () => {
     animateAndHide(() => {
-      if (!times[currentDay]) {
-        selectedDays.delete(currentDay);
-        setSelectedDays(new Set(selectedDays));
-      }
+      const newSelectedDays = new Set(selectedDays);
+      newSelectedDays.delete(currentDay);
+      setSelectedDays(newSelectedDays);
+      
+      const newTimes = { ...times };
+      delete newTimes[currentDay];
+      setTimes(newTimes);
     });
   };
 
   const handleConfirmTime = () => {
     animateAndHide(() => {
       const newTimes = { ...times };
-      // Apply the time to all selected days
-      Array.from(selectedDays).forEach(day => {
+      // Get the newly selected days (days that don't have times set yet)
+      const newlySelectedDays = Array.from(selectedDays).filter(day => !times[day]);
+      // Apply the time to all newly selected days
+      newlySelectedDays.forEach(day => {
         newTimes[day] = { ...tempTime };
       });
       setTimes(newTimes);
@@ -118,24 +131,20 @@ export default function SetWorkoutPlan() {
           const existingPlan = workoutPlan.find(plan => plan.day === day);
           if (existingPlan) {
             await updateWorkoutDay(existingPlan.id, {
-              startTime: times[day].start,
-              endTime: times[day].end
+              start_time: times[day].start,
+              end_time: times[day].end
             });
           } else {
             await addWorkoutDay({
               day,
-              startTime: times[day].start,
-              endTime: times[day].end
+              start_time: times[day].start,
+              end_time: times[day].end
             });
           }
         }
       }
       
-      if (workoutPlan.length === 0) {
-        router.replace('/(tabs)/TreeHome');
-      } else {
-        router.back();
-      }
+      setShowToast(true);
     } catch (error) {
       console.error('Error saving workout plan:', error);
     }
@@ -159,6 +168,13 @@ export default function SetWorkoutPlan() {
           </View>
         ) : (
           <>
+            {showToast && (
+              <Toast
+                message="Successfully updated workout plan"
+                type="success"
+                onHide={() => setShowToast(false)}
+              />
+            )}
             <ScrollView className="flex-1 px-4">
               <View className="mb-6 mt-4">
                 <View className="flex-row items-center">
